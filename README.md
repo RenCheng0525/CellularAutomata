@@ -37,10 +37,6 @@ An advanced interactive implementation of Conway's Game of Life with dynamic Vor
 3. Click on cells to manually toggle their state.
 4. Press **Play** to run the simulation.
 
-## Browser Support
-- Works on **modern desktop browsers** with JavaScript enabled.
-- **Not supported on mobile devices** due to performance constraints.
-
 ## License
 MIT License
 
