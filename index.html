@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Advanced Game of Life</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            display: flex;
+            overflow: hidden;
+            box-sizing: border-box;
+        }
+
+        .controls-panel {
+            width: 300px;
+            padding: 20px;
+            background: #2a2a2a;
+            border-radius: 8px;
+            margin-right: 20px;
+            height: calc(100vh - 40px);
+            overflow-y: auto;
+            box-sizing: border-box;
+        }
+
+        .main-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .control-group {
+            margin-bottom: 20px;
+        }
+
+        .control-group h3 {
+            margin: 0 0 10px 0;
+            color: #4ECDC4;
+        }
+
+        select {
+            width: 100%;
+            padding: 8px;
+            background: #333;
+            color: #fff;
+            border: 1px solid #444;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+
+        .grid-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .grid-controls input {
+            width: 60px;
+            padding: 5px;
+            background: #333;
+            color: #fff;
+            border: 1px solid #444;
+            border-radius: 4px;
+        }
+
+        .grid-controls label {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        button {
+            padding: 8px 16px;
+            margin: 5px 0;
+            width: 100%;
+            cursor: pointer;
+            background: #333;
+            color: #fff;
+            border: 1px solid #444;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background: #444;
+        }
+
+        #playPauseBtn {
+            background: #2C3E50;
+        }
+
+        #playPauseBtn:hover {
+            background: #34495E;
+        }
+
+        #playPauseBtn.active {
+            background: #E74C3C;
+        }
+
+        #playPauseBtn.active:hover {
+            background: #C0392B;
+        }
+
+        canvas {
+            background: #000;
+            border: 2px solid #333;
+            border-radius: 4px;
+        }
+
+        option {
+            padding: 5px;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: #4ECDC4;
+        }
+
+        .speed-control {
+            margin-top: 10px;
+        }
+
+        .speed-control input {
+            width: 100%;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="controls-panel">
+        <div class="control-group">
+            <h3>Pattern Selection</h3>
+            <select id="patternSelect" size="6" onchange="loadSelectedPattern()">
+                <option value="glider">Glider - Simple Spaceship</option>
+                <option value="lwss">Light-weight Spaceship</option>
+                <option value="mwss">Medium-weight Spaceship</option>
+                <option value="hwss">Heavy-weight Spaceship</option>
+                <option value="pulsar">Pulsar - Period 3 Oscillator</option>
+                <option value="pentadecathlon">Pentadecathlon - Period 15</option>
+                <option value="gosperGun">Gosper Glider Gun</option>
+                <option value="copperhead">Copperhead Spaceship</option>
+                <option value="acorn">Acorn Pattern</option>
+                <option value="rpentomino">R-pentomino</option>
+                <option value="diehard">Diehard Pattern</option>
+                <option value="hammerhead">Hammerhead Spaceship</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <h3>Grid Size</h3>
+            <div class="grid-controls">
+                <label>Width: <input type="number" id="gridWidth" value="32" min="10" max="100"></label>
+                <label>Height: <input type="number" id="gridHeight" value="32" min="10" max="100"></label>
+            </div>
+            <button onclick="updateGridSize()">Apply Size</button>
+        </div>
+
+        <div class="control-group">
+            <h3>Controls</h3>
+            <button id="playPauseBtn" onclick="toggleAnimation()">▶ Play</button>
+            <button onclick="resetRandom()">Random Fill</button>
+            <button onclick="regenerateVoronoi()">New Shapes</button>
+            <button onclick="clearGrid()">Clear Grid</button>
+            <div class="speed-control">
+                <label>Speed:</label>
+                <input type="range" id="speedControl" min="10" max="200" value="150" onchange="updateSpeed()"
+                    oninput="updateSpeed()">
+            </div>
+        </div>
+    </div>
+
+    <div class="main-area">
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Configuration
+        let GRID_WIDTH = 32;
+        let GRID_HEIGHT = 32;
+        const MIN_CELL_SIZE = 16;
+        let CELL_SIZE;
+        let isRunning = false;
+        let animationSpeed = 150;
+
+        // Colors
+        const COLORS = [
+            '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEEAD',
+            '#D4A5A5', '#9B59B6', '#3498DB', '#E74C3C', '#2ECC71',
+            '#F1C40F', '#E67E22', '#1ABC9C', '#34495E'
+        ];
+
+        // Game state
+        let points = [];
+        let voronoiPolygons = [];
+        let cellStates = new Map();
+        let cellColors = new Map();
+
+        // Patterns
+        const PATTERNS = {
+            glider: [[-1, -1], [0, -1], [1, -1], [-1, 0], [0, 1]],
+            lwss: [[0, 0], [1, 0], [2, 0], [3, 0], [-1, 1], [3, 1], [3, 2], [-1, 3], [2, 3]],
+            mwss: [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0], [-1, 1], [4, 1], [4, 2], [-1, 3], [3, 3], [0, 4]],
+            hwss: [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0], [5, 0], [-1, 1], [5, 1], [5, 2], [-1, 3], [4, 3], [0, 4], [1, 4]],
+            pulsar: [
+                [-2, 0], [-3, 0], [-4, 0], [2, 0], [3, 0], [4, 0],
+                [-2, 5], [-3, 5], [-4, 5], [2, 5], [3, 5], [4, 5],
+                [-2, -5], [-3, -5], [-4, -5], [2, -5], [3, -5], [4, -5],
+                [0, -2], [0, -3], [0, -4], [0, 2], [0, 3], [0, 4],
+                [5, -2], [5, -3], [5, -4], [5, 2], [5, 3], [5, 4],
+                [-5, -2], [-5, -3], [-5, -4], [-5, 2], [-5, 3], [-5, 4]
+            ],
+            pentadecathlon: [
+                [0, -4], [0, -3], [-1, -2], [1, -2], [0, -1],
+                [0, 0], [0, 1], [-1, 2], [1, 2], [0, 3], [0, 4]
+            ],
+            gosperGun: [
+                [0, 0], [1, 0], [0, 1], [1, 1], [10, 0], [10, 1], [10, 2],
+                [11, 3], [12, 4], [13, 4], [11, -1], [12, -2], [13, -2],
+                [14, 1], [16, 0], [17, 0], [16, 2], [17, 2], [20, 1],
+                [20, 0], [20, -1], [21, 1], [21, 0], [21, -1], [22, -2],
+                [24, -2], [24, -3], [22, 2], [24, 2], [24, 3], [34, -1],
+                [35, -1], [34, 0], [35, 0]
+            ],
+            copperhead: [
+                [-2, 0], [-1, 0], [1, 0], [2, 0], [-3, 1], [3, 1], [-3, 2],
+                [3, 2], [-2, 3], [-1, 3], [1, 3], [2, 3], [-1, 4], [0, 4],
+                [1, 4], [0, 5]
+            ],
+            acorn: [
+                [-3, 0], [-2, 0], [0, 0], [1, 0], [2, 0],
+                [-2, -1], [0, -2]
+            ],
+            rpentomino: [
+                [0, 0], [1, 0], [-1, 1], [0, 1], [0, 2]
+            ],
+            diehard: [
+                [-3, 0], [-2, 0], [-2, 1], [2, 1], [3, 1], [4, 1],
+                [3, -1]
+            ],
+            hammerhead: [
+                [-2, -2], [-1, -2], [0, -2], [1, -2], [-3, -1], [1, -1],
+                [-3, 0], [1, 0], [-2, 1], [0, 1], [-1, 2]
+            ]
+        };
+
+        function generatePoints() {
+            points = [];
+            const cellSize = Math.min(canvas.width / GRID_WIDTH, canvas.height / GRID_HEIGHT);
+            const jitter = cellSize * 0.4;
+
+            for (let y = 0; y < GRID_HEIGHT; y++) {
+                for (let x = 0; x < GRID_WIDTH; x++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const distance = Math.random() * jitter;
+                    const baseX = (x + 0.5) * cellSize;
+                    const baseY = (y + 0.5) * cellSize;
+
+                    points.push([
+                        baseX + Math.cos(angle) * distance,
+                        baseY + Math.sin(angle) * distance
+                    ]);
+                }
+            }
+
+            // Add extra points for more natural shapes
+            const extraPoints = Math.floor(GRID_WIDTH * GRID_HEIGHT * 0.1);
+            for (let i = 0; i < extraPoints; i++) {
+                points.push([
+                    Math.random() * canvas.width,
+                    Math.random() * canvas.height
+                ]);
+            }
+        }
+
+        function generateVoronoi() {
+            const delaunay = d3.Delaunay.from(points);
+            const voronoi = delaunay.voronoi([0, 0, canvas.width, canvas.height]);
+            voronoiPolygons = Array.from(voronoi.cellPolygons());
+
+            cellStates.clear();
+            cellColors.clear();
+            for (let i = 0; i < GRID_WIDTH * GRID_HEIGHT; i++) {
+                cellStates.set(i, 0);
+                cellColors.set(i, COLORS[Math.floor(Math.random() * COLORS.length)]);
+            }
+        }
+
+        function drawSmoothPolygon(points) {
+            if (!points || points.length < 3) return;
+
+            const smoothness = 0.2;
+            ctx.beginPath();
+
+            for (let i = 0; i < points.length; i++) {
+                const current = points[i];
+                const next = points[(i + 1) % points.length];
+                const prev = points[(i - 1 + points.length) % points.length];
+
+                if (i === 0) {
+                    ctx.moveTo(current[0], current[1]);
+                } else {
+                    const cp1x = current[0] + (next[0] - prev[0]) * smoothness;
+                    const cp1y = current[1] + (next[1] - prev[1]) * smoothness;
+                    const cp2x = next[0] - (next[0] - current[0]) * smoothness;
+                    const cp2y = next[1] - (next[1] - current[1]) * smoothness;
+
+                    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, next[0], next[1]);
+                }
+            }
+            ctx.closePath();
+        }
+
+        function draw() {
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            voronoiPolygons.forEach((polygon, i) => {
+                if (cellStates.get(i)) {
+                    drawSmoothPolygon(polygon);
+
+                    ctx.fillStyle = cellColors.get(i);
+                    ctx.fill();
+
+                    ctx.save();
+                    ctx.clip();
+                    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                    ctx.fill();
+                    ctx.restore();
+
+                    ctx.strokeStyle = '#000000';
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+                }
+            });
+        }
+
+        function getNeighbors(x, y) {
+            const neighbors = [];
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const nx = (x + dx + GRID_WIDTH) % GRID_WIDTH;
+                    const ny = (y + dy + GRID_HEIGHT) % GRID_HEIGHT;
+                    neighbors.push(ny * GRID_WIDTH + nx);
+                }
+            }
+            return neighbors;
+        }
+
+        function update() {
+            const newStates = new Map();
+
+            for (let y = 0; y < GRID_HEIGHT; y++) {
+                for (let x = 0; x < GRID_WIDTH; x++) {
+                    const index = y * GRID_WIDTH + x;
+                    const neighbors = getNeighbors(x, y);
+                    const liveNeighbors = neighbors.filter(n => cellStates.get(n)).length;
+
+                    if (cellStates.get(index)) {
+                        newStates.set(index, (liveNeighbors === 2 || liveNeighbors === 3) ? 1 : 0);
+                    } else {
+                        newStates.set(index, liveNeighbors === 3 ? 1 : 0);
+                    }
+                }
+            }
+
+            cellStates = newStates;
+        }
+
+        function animate() {
+            if (!isRunning) return;
+            update();
+            draw();
+            setTimeout(() => requestAnimationFrame(animate), 210 - animationSpeed);
+        }
+
+        function resizeCanvas() {
+            const maxWidth = window.innerWidth - 360;
+            const maxHeight = window.innerHeight - 40;
+
+            CELL_SIZE = Math.max(
+                MIN_CELL_SIZE,
+                Math.min(
+                    Math.floor(maxWidth / GRID_WIDTH),
+                    Math.floor(maxHeight / GRID_HEIGHT)
+                )
+            );
+
+            canvas.width = GRID_WIDTH * CELL_SIZE;
+            canvas.height = GRID_HEIGHT * CELL_SIZE;
+
+            generatePoints();
+            generateVoronoi();
+            draw();
+        }
+
+        function loadSelectedPattern() {
+            const patternName = document.getElementById('patternSelect').value;
+            const pattern = PATTERNS[patternName];
+            if (!pattern) return;
+
+            clearGrid();
+            const centerX = Math.floor(GRID_WIDTH / 2);
+            const centerY = Math.floor(GRID_HEIGHT / 2);
+
+            pattern.forEach(([dx, dy]) => {
+                const x = centerX + dx;
+                const y = centerY + dy;
+
+                if (x >= 0 && x < GRID_WIDTH && y >= 0 && y < GRID_HEIGHT) {
+                    const index = y * GRID_WIDTH + x;
+                    cellStates.set(index, 1);
+                }
+            });
+
+            draw();
+        }
+
+        function toggleAnimation() {
+            isRunning = !isRunning;
+            const btn = document.getElementById('playPauseBtn');
+            if (isRunning) {
+                animate();
+                btn.innerHTML = '⏸ Pause';
+                btn.classList.add('active');
+            } else {
+                btn.innerHTML = '▶ Play';
+                btn.classList.remove('active');
+            }
+        }
+
+        function resetRandom() {
+            for (let i = 0; i < GRID_WIDTH * GRID_HEIGHT; i++) {
+                cellStates.set(i, Math.random() > 0.85 ? 1 : 0);
+            }
+            draw();
+        }
+
+        function clearGrid() {
+            for (let i = 0; i < GRID_WIDTH * GRID_HEIGHT; i++) {
+                cellStates.set(i, 0);
+            }
+            draw();
+        }
+
+        function regenerateVoronoi() {
+            generatePoints();
+            generateVoronoi();
+            draw();
+        }
+
+        function updateGridSize() {
+            const newWidth = parseInt(document.getElementById('gridWidth').value);
+            const newHeight = parseInt(document.getElementById('gridHeight').value);
+
+            if (newWidth >= 10 && newWidth <= 100 &&
+                newHeight >= 10 && newHeight <= 100) {
+                GRID_WIDTH = newWidth;
+                GRID_HEIGHT = newHeight;
+                resizeCanvas();
+                clearGrid();
+            }
+        }
+
+        function updateSpeed() {
+            animationSpeed = document.getElementById('speedControl').value;
+        }
+
+        canvas.addEventListener('click', (event) => {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+
+            const x = Math.floor((event.clientX - rect.left) * scaleX / CELL_SIZE);
+            const y = Math.floor((event.clientY - rect.top) * scaleY / CELL_SIZE);
+
+            if (x >= 0 && x < GRID_WIDTH && y >= 0 && y < GRID_HEIGHT) {
+                const index = y * GRID_WIDTH + x;
+                cellStates.set(index, !cellStates.get(index));
+                draw();
+            }
+        });
+
+        // Initialize
+        window.addEventListener('resize', resizeCanvas);
+        window.addEventListener('load', () => {
+            resizeCanvas();
+            resetRandom();
+        });
+    </script>
+</body>
+
+</html>
